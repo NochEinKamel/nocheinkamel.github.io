@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kamelstall</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;height:100%;background:#1a1008;overflow:hidden;-webkit-user-select:none;user-select:none}
+  canvas{display:block;position:absolute;left:0;top:0;image-rendering:pixelated;image-rendering:crisp-edges;touch-action:manipulation;cursor:pointer}
+  .px{font-family:'Press Start 2P',monospace}
+  #hud{position:absolute;left:12px;top:12px;color:#fff3d6;font-size:10px;line-height:1.9;text-shadow:2px 2px 0 #5a3418;pointer-events:none}
+  #hud b{font-size:16px;color:#ffd27a;font-weight:normal;letter-spacing:1px}
+  #add{position:absolute;right:12px;top:12px;font-size:10px;background:#ffd27a;color:#5a3418;border:3px solid #5a3418;box-shadow:3px 3px 0 #5a3418;padding:8px 10px;cursor:pointer}
+  #add:active{transform:translate(2px,2px);box-shadow:1px 1px 0 #5a3418}
+  #hint{position:absolute;left:0;right:0;bottom:16px;text-align:center;color:#fff3d6;font-size:9px;text-shadow:2px 2px 0 #5a3418;pointer-events:none;transition:opacity 1s}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud" class="px"><b>KAMELSTALL</b><br><span id="count"></span></div>
+<button id="add" class="px">+ KAMEL</button>
+<div id="hint" class="px">Tipp ein Kamel an</div>
+<script>
+(() => {
+const dc = document.getElementById('c'), dctx = dc.getContext('2d');
+const wc = document.createElement('canvas'), wx = wc.getContext('2d');
+let W = 0, H = 0, S = 2, DPR = 1;
+let bg, pond, decor = [], palms = [], waterPx = [];
+const camels = [], prints = [], hearts = [], weeds = [];
+let selected = null, selT = 0, hovered = null, weedT = 8, time = 0;
+
+const BAYER = [[0,8,2,10],[12,4,14,6],[3,11,1,9],[15,7,13,5]];
+const rnd = (a, b) => b === undefined ? Math.random() * a : a + Math.random() * (b - a);
+const hex = h => [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)];
+const blank = (w, h) => Array.from({length: h}, () => Array(w).fill('.'));
+const gridFrom = rows => rows.map(r => r.split(''));
+const mirror = g => g.map(r => r.slice().reverse());
+function rotCW(g){ const h=g.length,w=g[0].length,n=blank(h,w); for(let r=0;r<h;r++)for(let c=0;c<w;c++) n[c][h-1-r]=g[r][c]; return n; }
+function rotCCW(g){ const h=g.length,w=g[0].length,n=blank(h,w); for(let r=0;r<h;r++)for(let c=0;c<w;c++) n[w-1-c][r]=g[r][c]; return n; }
+function outline(g, ch='k'){
+  const h=g.length,w=g[0].length,n=g.map(r=>r.slice());
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++) if(g[y][x]==='.'){
+    if((y>0&&g[y-1][x]!=='.')||(y<h-1&&g[y+1][x]!=='.')||(x>0&&g[y][x-1]!=='.')||(x<w-1&&g[y][x+1]!=='.')) n[y][x]=ch;
+  }
+  return n;
+}
+function toCanvas(g, colors){
+  const c=document.createElement('canvas'); c.width=g[0].length; c.height=g.length;
+  const x=c.getContext('2d');
+  for(let r=0;r<g.length;r++)for(let k=0;k<g[0].length;k++){
+    const ch=g[r][k]; if(ch==='.') continue;
+    x.fillStyle = typeof colors==='string' ? colors : colors[ch]; x.fillRect(k,r,1,1);
+  }
+  return c;
+}
+function pxEllipse(ctx,cx,cy,rx,ry,style){
+  ctx.fillStyle=style;
+  for(let y=-ry;y<=ry;y++)for(let x=-rx;x<=rx;x++)
+    if((x*x)/(rx*rx)+(y*y)/(ry*ry)<=1) ctx.fillRect(Math.round(cx+x),Math.round(cy+y),1,1);
+}
+
+/* ---------- Kamel-Sprites (schräg von der Seite) ---------- */
+const PALS = [
+  {o:'#4a2a12',b:'#d19a5a',h:'#e8bf82',H:'#f6d9a4',d:'#a86f37',n:'#2a1408'},
+  {o:'#3d2210',b:'#a8723f',h:'#c79358',H:'#ddb07a',d:'#7f5228',n:'#1a0c04'},
+  {o:'#4d3a26',b:'#e8d6ae',h:'#f8eed6',H:'#ffffff',d:'#c2a97e',n:'#3e2a18'},
+  {o:'#26150a',b:'#74492a',h:'#946339',H:'#b07c4c',d:'#55341d',n:'#0e0602'}
+];
+const PAL_W = [0,0,0,0,1,1,1,2,2,3];
+const inEll = (x,y,cx,cy,rx,ry) => ((x-cx)/rx)**2 + ((y-cy)/ry)**2 <= 1;
+function segDist(px,py,x0,y0,x1,y1){ const dx=x1-x0,dy=y1-y0,t=Math.max(0,Math.min(1,((px-x0)*dx+(py-y0)*dy)/(dx*dx+dy*dy))); return Math.hypot(px-x0-t*dx,py-y0-t*dy); }
+function paint(g,test,ch){ for(let y=0;y<g.length;y++)for(let x=0;x<g[0].length;x++) if(test(x,y)) g[y][x]=ch; }
+function shade(g,body,bcy,hump,hcy){
+  paint(g,(x,y)=>g[y][x]==='b'&&body(x,y)&&y>=bcy+1.4,'d');
+  paint(g,(x,y)=>g[y][x]==='b'&&hump(x,y)&&y<=hcy-0.6,'h');
+  paint(g,(x,y)=>g[y][x]==='h'&&y<=hcy-2,'H');
+}
+// Seitenansicht, Blick nach rechts. Füße auf Zeile 16.
+function camelSide(frame,tail,pose){
+  const g=blank(25,19), dy=pose==='sit'?4:0, drink=pose==='drink';
+  if(pose!=='sit'){
+    const ph=pose==='walk'?[-1,0,1,0][frame]:0;
+    for(const [x,far,sw] of [[6,1,-ph],[13,1,ph],[8,0,ph],[15,0,-ph]]){
+      const lift=sw>0?1:0;
+      for(let y=12;y<=16-lift;y++) g[y][y>=14?x+sw:x]=far?'f':'L';
+    }
+  } else { g[16][4]='f'; g[16][5]='f'; g[16][14]='L'; g[16][15]='L'; }
+  const bcy=9.5+dy, hcy=6.9+dy;
+  const body=(x,y)=>inEll(x,y,9.5,bcy,6.6,2.9);
+  const hump=(x,y)=>y<=bcy&&inEll(x,y,9,hcy,3.6,3.1);
+  const neck=(x,y)=> drink ? segDist(x,y,14.5,9,19.5,13)<1.25 : segDist(x,y,14.5,9+dy,17.6,4+dy)<1.25;
+  const head=(x,y)=> drink ? (inEll(x,y,20.5,14,2.1,1.3)||(x===23&&y===14))
+                           : (inEll(x,y,18.4,3.4+dy,2.2,1.4)||(x>=20&&x<=21&&(y===3+dy||y===4+dy)));
+  const nape=(x,y)=>segDist(x,y,12.5,7.5+dy,14.5,8.5+dy)<1.3;
+  paint(g,(x,y)=>body(x,y)||hump(x,y)||nape(x,y)||neck(x,y)||head(x,y),'b');
+  shade(g,body,bcy,hump,hcy);
+  for(const [x,y] of (tail?[[3,8],[2,9],[2,10],[1,11]]:[[3,8],[2,9],[2,10],[2,11]])) g[y+dy][x]='d';
+  if(drink){ g[13][21]='n'; g[12][19]='b'; } else { g[3+dy][19]='n'; g[1+dy][17]='b'; g[4+dy][21]='d'; }
+  return outline(g,'o');
+}
+// Front- (back=false) bzw. Rückansicht (back=true). Füße auf Zeile 16.
+function camelFront(frame,tail,pose,back){
+  const g=blank(13,19), dy=pose==='sit'?4:0;
+  if(pose!=='sit'){
+    const lift=pose==='walk'?[1,0,2,0][frame]:0; // 1: links hoch, 2: rechts hoch
+    for(const [x,near,side] of [[5,0,2],[7,0,1],[4,1,1],[8,1,2]]){
+      const end=(near?16:15)-(lift===side?1:0);
+      for(let y=12;y<=end;y++) g[y][x]=near?'L':'f';
+    }
+  } else { g[16][2]='L'; g[16][10]='L'; }
+  const bcy=10+dy, hcy=7.3+dy;
+  const body=(x,y)=>inEll(x,y,6,bcy,3.7,2.7);
+  const hump=(x,y)=>y<=bcy&&inEll(x,y,6,hcy,2.9,2.5);
+  const neckHead=(x,y)=> back
+    ? (inEll(x,y,6,3.6+dy,1.7,1.5)||(x>=5&&x<=7&&y>=4+dy&&y<=8+dy)||((x===5||x===7)&&y===2+dy))
+    : (inEll(x,y,6,3.6+dy,2,1.8)||(x>=5&&x<=7&&y>=4+dy&&y<=9+dy)||((x===4||x===8)&&y===2+dy));
+  if(back){ paint(g,neckHead,'b'); paint(g,(x,y)=>body(x,y)||hump(x,y),'b'); shade(g,body,bcy,hump,hcy);
+    for(let y=11;y<=13;y++) g[y+dy][tail&&y===13?5:6]='d'; }
+  else { paint(g,(x,y)=>body(x,y)||hump(x,y),'b'); shade(g,body,bcy,hump,hcy); paint(g,neckHead,'b');
+    g[3+dy][5]='n'; g[3+dy][7]='n'; for(let x=5;x<=7;x++) g[5+dy][x]='d'; }
+  return outline(g,'o');
+}
+function camelGridFor(dir,f,t){
+  const pose=f<4?'walk':f===4?'stand':f===5?'sit':'drink';
+  if(dir===0) return camelSide(f,t,pose);
+  if(dir===2) return mirror(camelSide(f,t,pose));
+  return camelFront(f,t,pose==='drink'?'stand':pose,dir===3);
+}
+// SPR[pal][dir][frame][tail]; frames 0-3 gehen, 4 stehen, 5 liegen, 6 trinken
+const SPR = PALS.map(p => [0,1,2,3].map(d => [0,1,2,3,4,5,6].map(f => [0,1].map(t =>
+  toCanvas(camelGridFor(d,f,t), {...p, L:p.b, f:p.d})))));
+function shadowCanvas(rx){ const c=document.createElement('canvas'); c.width=rx*2+1; c.height=5; pxEllipse(c.getContext('2d'),rx,2,rx,2,'rgba(110,60,20,0.3)'); return c; }
+const SHD = [shadowCanvas(9), shadowCanvas(5), shadowCanvas(9), shadowCanvas(5)];
+const DV = [[1,0],[0,1],[-1,0],[0,-1]];
+
+const HEART = toCanvas(gridFrom([".rr.rr.","rwrrrrr","rrrrrrr",".rrrrr.","..rrr..","...r..."]), {r:'#e8433a',w:'#ffd0c8'});
+const WEED = [
+  ["..oo..",".o.oo.","oo.o.o","o.oo.o",".oo.o.","..oo.."],
+  ["..oo..",".oo.o.","o.oo.o","oo.o.o",".o.oo.","..oo.."]
+].map(f => toCanvas(gridFrom(f), {o:'#8a6a3a'}));
+
+function makeCactus(){
+  const g = blank(11,14);
+  const top = 13 - (8 + (Math.random()*4|0));
+  for(let y=top;y<=12;y++) for(let x=4;x<=6;x++) g[y][x] = x===4 ? 'l' : 'g';
+  g[top][4]='.'; g[top][6]='.'; g[top][5]='l';
+  if(Math.random()<0.85){ const a = top+3+(Math.random()*3|0);
+    for(let y=a-3;y<=a+1;y++){ g[y][1]='l'; g[y][2]='g'; } g[a][3]='g'; g[a+1][3]='g'; g[a-3][1]='.'; }
+  if(Math.random()<0.7){ const b = top+2+(Math.random()*3|0);
+    for(let y=b-2;y<=b+1;y++){ g[y][8]='l'; g[y][9]='g'; } g[b][7]='g'; g[b+1][7]='g'; g[b-2][9]='.'; }
+  return toCanvas(outline(g), {g:'#4e9a3c', l:'#7cc455', k:'#1e4520'});
+}
+function makeRock(w,h){
+  const g = blank(w+2,h+2), cx=(w+1)/2, cy=(h+1)/2;
+  for(let y=1;y<=h;y++)for(let x=1;x<=w;x++){
+    const dx=(x-cx)/(w/2), dy=(y-cy)/(h/2);
+    if(dx*dx+dy*dy < 1 - Math.random()*0.18) g[y][x] = (dx+dy < -0.35) ? 'r' : (dx+dy > 0.45 ? 'q' : 'm');
+  }
+  return toCanvas(outline(g), {r:'#c2a787', m:'#9a8064', q:'#735c45', k:'#3e2f22'});
+}
+function makePalm(){
+  const w=25, h=31, g=blank(w,h), bx=12, base=29, top=10, bend=rnd(-3.5,3.5);
+  let tx=bx;
+  for(let y=base;y>=top;y--){
+    const t=(base-y)/(base-top), x=Math.round(bx+bend*t*t);
+    const ring=(y%3===0);
+    g[y][x]=ring?'U':'T'; g[y][x+1]='U';
+    if(y===top) tx=x;
+  }
+  const dirs=[-1,-0.65,-0.25,0.25,0.65,1].map(d=>d+rnd(-0.12,0.12));
+  for(const d of dirs){
+    const L=7+Math.random()*3, up=rnd(0.6,1.1)*(1-Math.abs(d)*0.5), droop=rnd(0.13,0.2);
+    for(let t=0;t<=L;t+=0.4){
+      const x=Math.round(tx+0.5+d*t*1.1), y=Math.round(top-up*t+droop*t*t);
+      if(x<1||x>w-2||y<1||y>h-2) continue;
+      g[y][x]='g';
+      if(t>1.5&&t<L-1.5&&y+1<h-1){ if(g[y+1][x]==='.') g[y+1][x]='g'; }
+      if(t>1&&t<L-2&&y-1>0) g[y-1][x]= g[y-1][x]==='.'||g[y-1][x]==='g' ? 'l' : g[y-1][x];
+    }
+  }
+  for(const [x,y] of [[tx,top+1],[tx+1,top+1],[tx-1,top+2],[tx+2,top+2]]) if(x>0&&x<w-1) g[y][x]='c';
+  return toCanvas(outline(g), {T:'#a8763f', U:'#7a522b', g:'#3f8a3a', l:'#6cbf4a', c:'#5a3618', k:'#1f3a1a'});
+}
+/* ---------- Welt ---------- */
+function makeNoise(w,h,cell){
+  const gw=Math.ceil(w/cell)+2, gh=Math.ceil(h/cell)+2, g=new Float32Array(gw*gh).map(()=>Math.random());
+  return (x,y)=>{ const fx=x/cell, fy=y/cell, ix=fx|0, iy=fy|0; let tx=fx-ix, ty=fy-iy;
+    tx=tx*tx*(3-2*tx); ty=ty*ty*(3-2*ty);
+    const a=g[iy*gw+ix], b=g[iy*gw+ix+1], c=g[(iy+1)*gw+ix], d=g[(iy+1)*gw+ix+1];
+    return a+(b-a)*tx+(c-a)*ty+(a-b-c+d)*tx*ty; };
+}
+function buildWorld(){
+  bg = document.createElement('canvas'); bg.width=W; bg.height=H;
+  const b = bg.getContext('2d'), img = b.createImageData(W,H), D = img.data;
+  const n1=makeNoise(W,H,30), n2=makeNoise(W,H,9);
+  const [S0,S1,S2,S3,SL,PB] = ['#ecc98f','#e0b77b','#d3a86c','#c2955a','#f6dcaa','#a8794a'].map(hex);
+  const [DEEP,MID,SHAL,FOAM,WET] = ['#2f6fb0','#3f8fd0','#5fb0e0','#8fd3ef','#b98a52'].map(hex);
+  const GR = ['#6aa84f','#4d8a3c','#8cc960'].map(hex), SH = ['#8f8a3e','#6e6a2c','#a9a052'].map(hex);
+  const levels=[S2,S1,S0];
+  const pr = Math.max(14, Math.min(W,H)*0.13);
+  pond = {rx: pr, ry: Math.round(pr*0.68)};
+  pond.cx = Math.round(rnd(pond.rx+30, W-pond.rx-30));
+  pond.cy = Math.round(rnd(pond.ry+44, H-pond.ry-30));
+  waterPx = [];
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+    const n=n1(x,y), m=n2(x,y);
+    const dune=Math.sin((x*0.8+y*0.5)*0.06+n*6);
+    const lv=(dune*0.5+0.5)*2+(BAYER[y&3][x&3]/16-0.47)*0.9+(m-0.5)*0.5;
+    let col=levels[Math.max(0,Math.min(2,Math.round(lv)))];
+    const rip=Math.sin(x*0.32+y*0.14+n*11+Math.sin(y*0.1)*1.5);
+    if(rip>0.97 && dune>-0.2) col=S3; else if(rip<-0.992) col=SL;
+    const r=Math.random(); if(r<0.006) col=PB; else if(r<0.01) col=SL;
+    const ex=(x-pond.cx)/pond.rx, ey=(y-pond.cy)/pond.ry, ne=Math.sqrt(ex*ex+ey*ey);
+    if(ne<1){ const w=ne+(BAYER[y&3][x&3]/16-0.5)*0.14; col = w<0.5?DEEP : w<0.8?MID : w<0.93?SHAL : FOAM; waterPx.push(x,y); }
+    else if(ne<1.1) col=WET;
+    else if(ne<1.55){ const p=1-(ne-1.1)/0.45; if(Math.random()<p*p*0.85) col=GR[Math.random()*3|0]; }
+    const i=(y*W+x)*4; D[i]=col[0]; D[i+1]=col[1]; D[i+2]=col[2]; D[i+3]=255;
+  }
+  // trockene Büsche
+  const shrubs = Math.round(W*H/2200);
+  for(let s=0;s<shrubs;s++){
+    const sx=rnd(4,W-4)|0, sy=rnd(4,H-4)|0;
+    const ex=(sx-pond.cx)/pond.rx, ey=(sy-pond.cy)/pond.ry; if(ex*ex+ey*ey<2.6) continue;
+    const k=3+(Math.random()*5|0);
+    for(let j=0;j<k;j++){ const x=sx+(rnd(-2,2.5)|0), y=sy+(rnd(-1.5,2)|0); if(x<0||y<0||x>=W||y>=H) continue;
+      const c=SH[Math.random()*3|0], i=(y*W+x)*4; D[i]=c[0]; D[i+1]=c[1]; D[i+2]=c[2]; }
+  }
+  b.putImageData(img,0,0);
+
+  decor=[]; palms=[];
+  const SHADOW='rgba(120,70,30,0.22)';
+  const np = 2 + (Math.random()*2|0), pa = rnd(6.28), palmList=[];
+  for(let i=0;i<np;i++){
+    const a = pa + i*(6.28/np) + rnd(-0.4,0.4);
+    const x = Math.round(pond.cx+Math.cos(a)*(pond.rx+4)), y = Math.round(pond.cy+Math.sin(a)*(pond.ry+3));
+    palmList.push({x,y,r:1,base:y,img:makePalm(),dx:x-12,dy:y-29});
+    pxEllipse(b, x+3, y+1, 8, 3, SHADOW);
+  }
+  const free = (x,y,r) => {
+    const ex=(x-pond.cx)/(pond.rx+r+8), ey=(y-pond.cy)/(pond.ry+r+8);
+    if(ex*ex+ey*ey<1) return false;
+    if(x<70 && y<40) return false;
+    for(const o of decor) if(Math.hypot(o.x-x,o.y-y) < o.r+r+12) return false;
+    return true;
+  };
+  decor.push(...palmList);
+  const nc = Math.max(3, Math.round(W*H/13000));
+  for(let i=0;i<nc;i++) for(let t=0;t<40;t++){
+    const x=Math.round(rnd(10,W-10)), y=Math.round(rnd(20,H-6));
+    if(!free(x,y,5)) continue;
+    const img=makeCactus(); decor.push({x,y,r:5,base:y,img,dx:x-5,dy:y-13});
+    pxEllipse(b, x+3, y, 5, 2, SHADOW); break;
+  }
+  const nr = Math.max(2, Math.round(W*H/15000));
+  for(let i=0;i<nr;i++) for(let t=0;t<40;t++){
+    const w=7+(Math.random()*5|0), h=5+(Math.random()*3|0), x=Math.round(rnd(10,W-10)), y=Math.round(rnd(14,H-8));
+    if(!free(x,y,w/2)) continue;
+    decor.push({x,y,r:w/2,base:y+h/2,img:makeRock(w,h),dx:Math.round(x-w/2-1),dy:Math.round(y-h/2-1)});
+    pxEllipse(b, x+2, y+2, Math.round(w/2), Math.round(h/2), SHADOW); break;
+  }
+}
+
+/* ---------- Bewegung & Hindernisse ---------- */
+function blocked(x,y){
+  const ex=(x-pond.cx)/(pond.rx+8), ey=(y-pond.cy)/(pond.ry+3);
+  if(ex*ex+ey*ey<1) return true;
+  for(const o of decor) if(Math.abs(o.x-x)<o.r+9 && Math.abs(o.base-y)<5) return true;
+  return false;
+}
+function pathClear(pts){
+  for(let i=0;i<pts.length-1;i++){
+    const [x0,y0]=pts[i], [x1,y1]=pts[i+1], L=Math.hypot(x1-x0,y1-y0), n=Math.max(1,Math.ceil(L/3));
+    for(let k=1;k<=n;k++) if(blocked(x0+(x1-x0)*k/n, y0+(y1-y0)*k/n)) return false;
+  }
+  return true;
+}
+const lpath = (x0,y0,x1,y1,hFirst) => hFirst ? [[x0,y0],[x1,y0],[x1,y1]] : [[x0,y0],[x0,y1],[x1,y1]];
+function setPath(c, pts, after){ c.path = pts.slice(1).map(([x,y])=>({x,y})); c.after = after||null; c.state='walk'; }
+
+function wander(c){
+  for(let t=0;t<30;t++){
+    const R=90, tx=Math.max(12,Math.min(W-12,c.x+rnd(-R,R))), ty=Math.max(20,Math.min(H-6,c.y+rnd(-R,R)));
+    if(Math.abs(tx-c.x)+Math.abs(ty-c.y) < 15 || blocked(tx,ty)) continue;
+    const pts=lpath(c.x,c.y,tx,ty,Math.random()<0.5);
+    if(pathClear(pts)){ setPath(c,pts); return true; }
+  }
+  return false;
+}
+function tryDrink(c){
+  const {cx,cy,rx,ry}=pond, spots=[];
+  for(const side of [0,1]){
+    const oy=rnd(-0.3,0.3)*ry, ext=rx*Math.sqrt(1-(oy/ry)**2)+9;
+    spots.push({x: side===0 ? cx-ext : cx+ext, y: cy+oy, face: side===0?0:2});
+  }
+  spots.sort((a,b)=>Math.hypot(a.x-c.x,a.y-c.y)-Math.hypot(b.x-c.x,b.y-c.y));
+  for(const s of spots){
+    if(s.x<12||s.x>W-12||s.y<20||s.y>H-6) continue;
+    const pts=lpath(c.x,c.y,Math.round(s.x),Math.round(s.y),false);
+    if(pathClear(pts)){ setPath(c,pts,{state:'drink',dir:s.face}); return true; }
+  }
+  return false;
+}
+function decide(c){
+  if(c.thirst>1 && tryDrink(c)) return;
+  const r=Math.random();
+  if(c.state==='sit'){ c.state='idle'; c.t=rnd(1.5,3); return; }
+  if(r<0.5 && wander(c)) return;
+  if(r<0.82){ c.state='idle'; c.t=rnd(2,6); return; }
+  c.state='sit'; c.t=rnd(8,20);
+}
+
+/* ---------- Kamele ---------- */
+const NAMES=['Kurt','Hildegard','Brösel','Frieda','Höcker-Horst','Sandra','Karl','Lotti','Mustafa','Wüsten-Willi','Dünen-Dieter','Gisela','Bruno','Oase-Olga','Fatima','Paul','Zimtstern','Helmut','Saharah','Knut','Dattel','Trudi','Erwin','Krümel','Ilse','Yusuf','Rudi','Mila','Ottokar','Sternchen'];
+let nameIdx = Math.random()*NAMES.length|0;
+const STATUS={walk:'schlendert',idle:'guckt rum',sit:'döst',drink:'trinkt'};
+function newCamel(x,y){
+  const c={x,y,dir:Math.random()*4|0,state:'idle',t:rnd(0.5,3),path:[],after:null,anim:0,lastF:-1,tail:0,
+    thirst:rnd(0,0.9),thirstRate:1/rnd(45,100),name:NAMES[(nameIdx++)%NAMES.length],
+    pal:PAL_W[Math.random()*PAL_W.length|0],speed:rnd(7,10)};
+  camels.push(c); updateCount(); return c;
+}
+function spawnInitial(){
+  const n=Math.max(4,Math.min(12,Math.round(W*H/9000)));
+  for(let i=0;i<n;i++) for(let t=0;t<60;t++){
+    const x=rnd(14,W-14), y=rnd(22,H-8);
+    if(blocked(x,y) || camels.some(c=>Math.hypot(c.x-x,c.y-y)<20)) continue;
+    const c=newCamel(Math.round(x),Math.round(y)); if(Math.random()<0.3){c.state='sit';c.t=rnd(3,15);} break;
+  }
+}
+function spawnFromEdge(){
+  if(camels.length>=30) return;
+  for(let t=0;t<30;t++){
+    const side=Math.random()*4|0;
+    let x,y,tx,ty;
+    if(side===0){x=-12;y=rnd(20,H-14);tx=rnd(20,W*0.4);ty=y;}
+    else if(side===1){x=W+12;y=rnd(20,H-14);tx=rnd(W*0.6,W-20);ty=y;}
+    else if(side===2){x=rnd(20,W-20);y=-4;tx=x;ty=rnd(26,H*0.4);}
+    else {x=rnd(20,W-20);y=H+20;tx=x;ty=rnd(H*0.6,H-8);}
+    x=Math.round(x);y=Math.round(y);tx=Math.round(tx);ty=Math.round(ty);
+    if(blocked(tx,ty)) continue;
+    const pts=[[x,y],[tx,ty]]; if(!pathClear(pts)) continue;
+    const c=newCamel(x,y); setPath(c,pts); return;
+  }
+}
+function updateCount(){ document.getElementById('count').textContent = camels.length + (camels.length===1?' Kamel':' Kamele'); }
+
+function updateCamel(c,dt){
+  c.thirst += dt*c.thirstRate;
+  c.t -= dt;
+  if(Math.random()<dt*(c.state==='walk'?0.8:0.5)) c.tail^=1;
+  if(c.state==='walk'){
+    let step=c.speed*dt;
+    while(step>0 && c.path.length){
+      const wp=c.path[0], dx=wp.x-c.x, dy=wp.y-c.y, dist=Math.abs(dx)+Math.abs(dy);
+      if(dist<=step){ c.x=wp.x; c.y=wp.y; step-=dist; c.path.shift(); c.anim+=dist/4; continue; }
+      if(Math.abs(dx)>0.001){ c.x+=Math.sign(dx)*Math.min(step,Math.abs(dx)); c.dir=dx>0?0:2; }
+      else { c.y+=Math.sign(dy)*step; c.dir=dy>0?1:3; }
+      c.anim+=step/4; step=0;
+    }
+    const f=Math.floor(c.anim)%4;
+    if(f!==c.lastF && (f===0||f===2)){
+      const horiz=c.dir%2===0, sg=c.dir===2?-1:1;
+      prints.push(horiz ? {x:Math.round(c.x+(f===0?-4:3)*sg), y:Math.round(c.y)+(f===0?0:1), t:0}
+                        : {x:Math.round(c.x)+(f===0?-2:2), y:Math.round(c.y), t:0});
+      if(prints.length>700) prints.shift();
+    }
+    c.lastF=f;
+    if(!c.path.length){
+      if(c.after){ c.state=c.after.state; c.dir=c.after.dir; c.t=rnd(4,7); c.after=null; }
+      else { c.state='idle'; c.t=rnd(1,4); }
+    }
+  } else if(c.t<=0){
+    if(c.state==='drink') c.thirst=0;
+    decide(c);
+  }
+}
+
+/* ---------- Zeichnen ---------- */
+function camelFrame(c){ return c.state==='walk' ? Math.floor(c.anim)%4 : c.state==='sit' ? 5 : c.state==='drink' ? 6 : 4; }
+function camelBox(c){ const s=SPR[0][c.dir][0][0]; return {x:Math.round(c.x)-(s.width>>1), y:Math.round(c.y)-16, w:s.width, h:s.height}; }
+
+function render(){
+  wx.drawImage(bg,0,0);
+  // Glitzern auf dem Wasser
+  const nW=waterPx.length/2, tick=Math.floor(time*2.5);
+  wx.fillStyle='#e2f6ff';
+  for(let i=0;i<Math.max(3,nW/90);i++){ const k=((i*7919+tick*104729+i*i*31)%nW)*2; wx.fillRect(waterPx[k],waterPx[k+1],1,1); }
+  // Fußspuren
+  for(const p of prints){ wx.fillStyle=`rgba(140,90,45,${0.38*(1-p.t/30)})`; wx.fillRect(p.x,p.y,1,1); }
+  // Schatten
+  for(const c of camels){ const sh=SHD[c.dir]; wx.drawImage(sh, Math.round(c.x)-(sh.width>>1)+(c.dir%2?0:(c.dir===0?-1:1)), Math.round(c.y)-1); }
+  // Sortiert nach y
+  const ents=[];
+  for(const d of decor) ents.push({base:d.base, draw:()=>wx.drawImage(d.img,d.dx,d.dy)});
+  for(const c of camels) ents.push({base:c.y, draw:()=>{
+    const b=camelBox(c); wx.drawImage(SPR[c.pal][c.dir][camelFrame(c)][c.tail], b.x, b.y);
+    if(c.state==='drink' && Math.floor(time*1.6)%2===0){
+      const hx=Math.round(c.x+(c.dir===0?12:-12)), hy=Math.round(c.y-1);
+      wx.fillStyle='#e2f6ff'; wx.fillRect(hx-2,hy,1,1); wx.fillRect(hx+2,hy,1,1);
+    }
+  }});
+  for(const w of weeds) ents.push({base:w.y, draw:()=>{
+    wx.fillStyle='rgba(120,70,30,0.22)'; wx.fillRect(Math.round(w.x-2),Math.round(w.y),5,1);
+    wx.drawImage(WEED[Math.floor(w.x/3)&1], Math.round(w.x-3), Math.round(w.y-6-Math.abs(Math.sin(w.b))*4));
+  }});
+  ents.sort((a,b)=>a.base-b.base).forEach(e=>e.draw());
+  for(const h of hearts){ wx.globalAlpha=Math.min(1,(1.4-h.t)*2); wx.drawImage(HEART, Math.round(h.x-3), Math.round(h.y-14-h.t*10)); }
+  wx.globalAlpha=1;
+
+  dctx.setTransform(1,0,0,1,0,0);
+  dctx.imageSmoothingEnabled=false;
+  dctx.drawImage(wc,0,0,W*S*DPR,H*S*DPR);
+  dctx.setTransform(DPR,0,0,DPR,0,0);
+  const lab = new Set(); if(selected) lab.add(selected); if(hovered) lab.add(hovered);
+  for(const c of lab) drawLabel(c, c===selected);
+}
+function drawLabel(c, full){
+  const b=camelBox(c), cx=(c.x)*S, top=b.y*S-10;
+  dctx.font="10px 'Press Start 2P', monospace"; dctx.textAlign='center'; dctx.textBaseline='top';
+  const l1=c.name, l2=full?STATUS[c.state]:'';
+  const w=Math.max(dctx.measureText(l1).width, l2?dctx.measureText(l2).width*0.8:0)+16, h=full?36:22;
+  const x=Math.round(cx-w/2), y=Math.round(top-h);
+  dctx.fillStyle='#5a3418'; dctx.fillRect(x+3,y+3,w,h);
+  dctx.fillStyle='#fff3d6'; dctx.fillRect(x,y,w,h);
+  dctx.strokeStyle='#5a3418'; dctx.lineWidth=2; dctx.strokeRect(x+1,y+1,w-2,h-2);
+  dctx.fillStyle='#5a3418'; dctx.fillText(l1, Math.round(cx), y+6);
+  if(l2){ dctx.font="8px 'Press Start 2P', monospace"; dctx.fillStyle='#a86f37'; dctx.fillText(l2, Math.round(cx), y+21); }
+}
+
+/* ---------- Loop ---------- */
+let last=performance.now();
+function frame(now){
+  const dt=Math.min(0.05,(now-last)/1000); last=now; time+=dt;
+  for(const c of camels) updateCamel(c,dt);
+  for(let i=prints.length-1;i>=0;i--){ prints[i].t+=dt; if(prints[i].t>30) prints.splice(i,1); }
+  for(let i=hearts.length-1;i>=0;i--){ hearts[i].t+=dt; if(hearts[i].t>1.4) hearts.splice(i,1); }
+  weedT-=dt; if(weedT<=0){ weedT=rnd(18,40); weeds.push({x:-8,y:rnd(20,H-10),vx:rnd(22,34),b:0}); }
+  for(let i=weeds.length-1;i>=0;i--){ const w=weeds[i]; w.x+=w.vx*dt; w.b+=dt*7; if(w.x>W+10) weeds.splice(i,1); }
+  if(selected){ selT-=dt; if(selT<=0) selected=null; }
+  render();
+  requestAnimationFrame(frame);
+}
+
+/* ---------- Eingabe ---------- */
+function camelAt(ex,ey){
+  const px=ex/S, py=ey/S;
+  const hits=camels.filter(c=>{const b=camelBox(c); return px>=b.x-2&&px<=b.x+b.w+2&&py>=b.y-2&&py<=b.y+b.h+2;});
+  hits.sort((a,b)=>b.y-a.y); return hits[0]||null;
+}
+dc.addEventListener('pointerdown', e=>{
+  const c=camelAt(e.clientX,e.clientY);
+  if(c){
+    selected=c; selT=5; hearts.push({x:c.x,y:c.y-6,t:0});
+    if(c.state==='walk' && Math.random()<0.4){ c.state='idle'; c.t=rnd(2,4); c.path=[]; c.after=null; }
+    document.getElementById('hint').style.opacity=0;
+  } else selected=null;
+});
+dc.addEventListener('pointermove', e=>{ if(e.pointerType==='mouse') hovered=camelAt(e.clientX,e.clientY); });
+dc.addEventListener('pointerleave', ()=>hovered=null);
+document.getElementById('add').addEventListener('click', spawnFromEdge);
+
+function resize(first){
+  DPR=Math.min(2,window.devicePixelRatio||1);
+  const iw=innerWidth, ih=innerHeight;
+  S=Math.max(2,Math.round(Math.min(iw,ih)/170));
+  W=Math.ceil(iw/S); H=Math.ceil(ih/S);
+  wc.width=W; wc.height=H;
+  dc.width=Math.round(iw*DPR); dc.height=Math.round(ih*DPR);
+  dc.style.width=iw+'px'; dc.style.height=ih+'px';
+  buildWorld();
+  prints.length=0;
+  if(first) spawnInitial();
+  else for(const c of camels){
+    c.x=Math.max(12,Math.min(W-12,c.x)); c.y=Math.max(20,Math.min(H-6,c.y));
+    for(let t=0;t<60&&blocked(c.x,c.y);t++){ c.x=rnd(14,W-14); c.y=rnd(22,H-8); }
+    c.path=[]; c.after=null; c.state='idle'; c.t=rnd(0.5,2);
+  }
+}
+let rt; window.addEventListener('resize', ()=>{ clearTimeout(rt); rt=setTimeout(()=>resize(false),200); });
+resize(true);
+setTimeout(()=>{ document.getElementById('hint').style.opacity=0; }, 9000);
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
