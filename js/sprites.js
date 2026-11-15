@@ -189,6 +189,26 @@ function drawFrond(g, ox, oy, ang, len, droop, back) {
   }
 }
 
+/**
+ * Wedel, der auf den Betrachter zukommt: verkürzt, hängt nach vorn-unten,
+ * Fiedern stehen zu beiden Seiten ab (in der Mitte am breitesten).
+ */
+function drawFacingFrond(g, ox, oy, lean, len) {
+  for (let t = 0; t <= len; t += 0.5) {
+    const x = Math.round(ox + lean * t), y = Math.round(oy + t);
+    const half = t < 1 ? 0 : Math.round(Math.sin(Math.PI * Math.min(1, t / len)) * 2.4);
+    for (let k = 1; k <= half; k++) {
+      if (Math.round(t * 2) % 2) continue; // Kammstruktur
+      const dy = k;
+      for (const sx of [-1, 1]) {
+        const px = x + sx * k, py = y + dy;
+        if (px > 0 && px < PALM_W - 1 && py < PALM_H - 1 && g[py][px] === '.') g[py][px] = 'g';
+      }
+    }
+    g[y][x] = t < len * 0.6 ? 'l' : 'm';
+  }
+}
+
 /** Zeichnet `draw` in eine eigene Ebene, umrandet sie und legt sie über `g`. */
 function layer(g, draw) {
   const l = blank(PALM_W, PALM_H);
@@ -235,6 +255,10 @@ export function makePalm() {
     for (const [x, y] of [[cx - 1, ty + 2], [cx + 1, ty + 2], [cx, ty + 3]]) l[y][x] = 'c';
     l[ty + 2][cx - 1] = 'C';
   });
+
+  // ein Wedel nach vorn, über Stamm und Kokosnüssen
+  const lean = rnd(0.3, 0.7) * (Math.random() < 0.5 ? -1 : 1);
+  layer(g, l => drawFacingFrond(l, Math.floor(tx), ty + 1, lean, Math.round(rnd(8, 10))));
 
   return toCanvas(g, PALM_COLORS);
 }
