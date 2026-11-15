@@ -1,7 +1,7 @@
 /** Wüstenhintergrund, Oase, Deko sowie Kollisionsabfragen. */
 import { state } from './state.js';
 import { BAYER, rnd, hex, makeNoise, pxEllipse } from './pixel.js';
-import { makeCactus, makeRock, makePalm } from './sprites.js';
+import { makeCactus, makeRock, makePalm, PALM_FOOT } from './sprites.js';
 
 const DECOR_SHADOW = 'rgba(120,70,30,0.22)';
 
@@ -72,8 +72,8 @@ export function buildWorld() {
   for (let i = 0; i < np; i++) {
     const a = pa + i * (6.28 / np) + rnd(-0.4, 0.4);
     const x = Math.round(pond.cx + Math.cos(a) * (pond.rx + 4)), y = Math.round(pond.cy + Math.sin(a) * (pond.ry + 3));
-    decor.push({ x, y, r: 1, base: y, img: makePalm(), dx: x - 12, dy: y - 29 });
-    pxEllipse(b, x + 3, y + 1, 8, 3, DECOR_SHADOW);
+    decor.push({ x, y, r: 1, base: y, img: makePalm(), dx: x - PALM_FOOT.x, dy: y - PALM_FOOT.y });
+    pxEllipse(b, x + 3, y + 1, 10, 3, DECOR_SHADOW);
   }
 
   const free = (x, y, r) => {

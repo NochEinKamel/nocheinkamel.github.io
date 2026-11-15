@@ -153,29 +153,88 @@ export function makeRock(w, h) {
   return toCanvas(outline(g), { r: '#c2a787', m: '#9a8064', q: '#735c45', k: '#3e2f22' });
 }
 
-/** Palme, 25×31 Pixel; Stammfuß bei (12, 29). */
+/* ---------- Palme ---------- */
+
+const PALM_W = 37, PALM_H = 38;
+/** Position des Stammfußes im Palmen-Sprite. */
+export const PALM_FOOT = { x: 18, y: 36 };
+
+const PALM_COLORS = {
+  T: '#a8763f', U: '#7a522b',               // Stamm hell / Ringe
+  B: '#2f6a2c', b: '#3d7d36',               // hintere Wedel: Rippe / Fiedern
+  g: '#3f8a3a', m: '#57a83f', l: '#7fcf55', // vordere Wedel: Fiedern / Rippe / Glanz
+  c: '#5a3618', C: '#8a5a2a',               // Kokosnüsse
+  k: '#1f3a1a',                             // Umriss
+};
+
+/**
+ * Ein gefiederter Wedel: Mittelrippe als Wurfparabel (Startwinkel `ang` in Grad,
+ * 0 = rechts, 180 = links), darunter hängende Fiedern, zur Spitze hin kürzer.
+ */
+function drawFrond(g, ox, oy, ang, len, droop, back) {
+  const rib = back ? 'B' : 'm', leaf = back ? 'b' : 'g';
+  const vx = Math.cos(ang * Math.PI / 180), vy = -Math.sin(ang * Math.PI / 180), side = Math.sign(vx);
+  const set = (x, y, ch, force) => {
+    x = Math.round(x); y = Math.round(y);
+    if (x < 1 || x > PALM_W - 2 || y < 1 || y > PALM_H - 2) return;
+    if (force || g[y][x] === '.') g[y][x] = ch;
+  };
+  let step = 0;
+  for (let t = 0; t <= len; t += 0.4, step++) {
+    const x = ox + vx * t, y = oy + vy * t + droop * t * t;
+    const fl = t < 1.5 ? 0 : Math.round(0.4 + (1 - t / len) * 2.4);
+    if (step % 2 === 0) for (let k = 1; k <= fl; k++) set(x + side * k * 0.5, y + k, leaf, false);
+    set(x, y, rib, true);
+    if (!back && t > 1 && t < len * 0.6) set(x, y - 1, 'l', false);
+  }
+}
+
+/** Zeichnet `draw` in eine eigene Ebene, umrandet sie und legt sie über `g`. */
+function layer(g, draw) {
+  const l = blank(PALM_W, PALM_H);
+  draw(l);
+  const o = outline(l);
+  for (let y = 0; y < PALM_H; y++) for (let x = 0; x < PALM_W; x++) if (o[y][x] !== '.') g[y][x] = o[y][x];
+}
+
+/**
+ * Palme mit Stammkrümmung, Wedeln in zwei Ebenen und Kokosnüssen.
+ * Jeder Wedel bekommt einen eigenen Umriss, damit sie sich sichtbar voneinander abheben.
+ */
 export function makePalm() {
-  const w = 25, h = 31, g = blank(w, h), bx = 12, base = 29, top = 10, bend = rnd(-3.5, 3.5);
-  let tx = bx;
-  for (let y = base; y >= top; y--) {
-    const t = (base - y) / (base - top), x = Math.round(bx + bend * t * t);
-    const ring = (y % 3 === 0);
-    g[y][x] = ring ? 'U' : 'T';
-    g[y][x + 1] = 'U';
-    if (y === top) tx = x;
-  }
-  const dirs = [-1, -0.65, -0.25, 0.25, 0.65, 1].map(d => d + rnd(-0.12, 0.12));
-  for (const d of dirs) {
-    const L = 7 + Math.random() * 3, up = rnd(0.6, 1.1) * (1 - Math.abs(d) * 0.5), droop = rnd(0.13, 0.2);
-    for (let t = 0; t <= L; t += 0.4) {
-      const x = Math.round(tx + 0.5 + d * t * 1.1), y = Math.round(top - up * t + droop * t * t);
-      if (x < 1 || x > w - 2 || y < 1 || y > h - 2) continue;
-      g[y][x] = 'g';
-      if (t > 1.5 && t < L - 1.5 && y + 1 < h - 1 && g[y + 1][x] === '.') g[y + 1][x] = 'g';
-      if (t > 1 && t < L - 2 && y - 1 > 0) g[y - 1][x] = g[y - 1][x] === '.' || g[y - 1][x] === 'g' ? 'l' : g[y - 1][x];
+  const g = blank(PALM_W, PALM_H), { x: bx, y: base } = PALM_FOOT;
+  const top = 16, bend = rnd(-3.5, 3.5);
+  const trunkX = y => Math.round(bx + bend * ((base - y) / (base - top)) ** 2);
+  const tx = trunkX(top) + 0.5, ty = top;
+  const j = () => rnd(-7, 7);
+
+  // hintere Wedel: dunkler, steil nach oben
+  for (const a of [64, 116]) layer(g, l => drawFrond(l, tx, ty, a + j(), rnd(8, 10), rnd(0.05, 0.08), true));
+
+  // Stamm (durchgehend, auch wo er seitlich versetzt)
+  layer(g, l => {
+    let px = trunkX(base);
+    for (let y = base; y >= top; y--) {
+      const x = trunkX(y);
+      if (x !== px) l[y + 1][x + (x > px ? 0 : 1)] = 'U';
+      l[y][x] = y % 3 === 0 ? 'U' : 'T';
+      l[y][x + 1] = 'U';
+      px = x;
     }
-  }
-  for (const [x, y] of [[tx, top + 1], [tx + 1, top + 1], [tx - 1, top + 2], [tx + 2, top + 2]])
-    if (x > 0 && x < w - 1) g[y][x] = 'c';
-  return toCanvas(outline(g), { T: '#a8763f', U: '#7a522b', g: '#3f8a3a', l: '#6cbf4a', c: '#5a3618', k: '#1f3a1a' });
+  });
+
+  // vordere Wedel: fächern sternförmig auf, die flachen hängen stärker durch
+  const front = [[90, 7, 0.07], [40, 11, 0.07], [140, 11, 0.07], [12, 12, 0.08], [168, 12, 0.08]];
+  if (Math.random() < 0.5) front.push([Math.random() < 0.5 ? 62 : 118, 9, 0.08]);
+  for (const [a, len, droop] of front)
+    layer(g, l => drawFrond(l, tx, ty, a + j(), len + rnd(-1, 1.5), droop + rnd(-0.015, 0.02), false));
+
+  // Kokosnüsse unter der Krone
+  const cx = Math.floor(tx);
+  layer(g, l => {
+    for (const [x, y] of [[cx - 1, ty + 2], [cx + 1, ty + 2], [cx, ty + 3]]) l[y][x] = 'c';
+    l[ty + 2][cx - 1] = 'C';
+  });
+
+  return toCanvas(g, PALM_COLORS);
 }
