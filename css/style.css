@@ -1,0 +1,69 @@
+html, body {
+  margin: 0;
+  height: 100%;
+  background: #1a1008;
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+canvas {
+  display: block;
+  position: absolute;
+  left: 0;
+  top: 0;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  touch-action: manipulation;
+  cursor: pointer;
+}
+
+.px { font-family: 'Press Start 2P', monospace; }
+
+#hud {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  color: #fff3d6;
+  font-size: 10px;
+  line-height: 1.9;
+  text-shadow: 2px 2px 0 #5a3418;
+  pointer-events: none;
+}
+#hud b {
+  font-size: 16px;
+  color: #ffd27a;
+  font-weight: normal;
+  letter-spacing: 1px;
+}
+
+#add {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  font-size: 10px;
+  background: #ffd27a;
+  color: #5a3418;
+  border: 3px solid #5a3418;
+  box-shadow: 3px 3px 0 #5a3418;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+#add:active {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 #5a3418;
+}
+
+#hint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 16px;
+  text-align: center;
+  color: #fff3d6;
+  font-size: 9px;
+  text-shadow: 2px 2px 0 #5a3418;
+  pointer-events: none;
+  transition: opacity 1s;
+}
+#hint.hidden { opacity: 0; }
