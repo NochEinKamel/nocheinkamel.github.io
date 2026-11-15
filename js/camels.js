@@ -4,7 +4,8 @@ import { rnd } from './pixel.js';
 import { PAL_WEIGHTS, FRAME } from './sprites.js';
 import { blocked, pathClear, lpath } from './world.js';
 
-export const MAX_CAMELS = 30;
+/** Obergrenze für Kamele: mindestens 30, auf großen Wüsten entsprechend mehr. */
+export const maxCamels = () => Math.max(30, Math.round(state.W * state.H / 6000));
 
 const NAMES = ['Kurt', 'Hildegard', 'Brösel', 'Frieda', 'Höcker-Horst', 'Sandra', 'Karl', 'Lotti', 'Mustafa',
   'Wüsten-Willi', 'Dünen-Dieter', 'Gisela', 'Bruno', 'Oase-Olga', 'Fatima', 'Paul', 'Zimtstern', 'Helmut',
@@ -79,7 +80,7 @@ function newCamel(x, y) {
 
 export function spawnInitial() {
   const { W, H, camels } = state;
-  const n = Math.max(4, Math.min(12, Math.round(W * H / 9000)));
+  const n = Math.max(4, Math.min(24, Math.round(W * H / 9000)));
   for (let i = 0; i < n; i++) for (let t = 0; t < 60; t++) {
     const x = rnd(14, W - 14), y = rnd(22, H - 8);
     if (blocked(x, y) || camels.some(c => Math.hypot(c.x - x, c.y - y) < 20)) continue;
@@ -92,7 +93,7 @@ export function spawnInitial() {
 /** Lässt ein Kamel vom Bildschirmrand hereinlaufen. Gibt das Kamel oder null zurück. */
 export function spawnFromEdge() {
   const { W, H } = state;
-  if (state.camels.length >= MAX_CAMELS) return null;
+  if (state.camels.length >= maxCamels()) return null;
   for (let t = 0; t < 30; t++) {
     const side = Math.random() * 4 | 0;
     let x, y, tx, ty;

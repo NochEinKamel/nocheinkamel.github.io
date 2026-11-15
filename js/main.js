@@ -91,10 +91,17 @@ addBtn.addEventListener('click', () => { if (spawnFromEdge()) updateCount(); });
 
 /* ---------- Resize ---------- */
 
+/**
+ * Größe eines Welt-Pixels in CSS-Pixeln. Wächst nur langsam mit dem Bildschirm
+ * (Handy 2, Laptop/Full-HD 3, große Monitore 4) – mehr Platz heißt also vor allem mehr Wüste.
+ */
+const PX_PER_SCALE_STEP = 360;
+const pixelScale = (w, h) => Math.max(2, Math.min(4, Math.round(Math.min(w, h) / PX_PER_SCALE_STEP)));
+
 function resize(first) {
   const iw = innerWidth, ih = innerHeight;
   state.DPR = Math.min(2, devicePixelRatio || 1);
-  state.S = Math.max(2, Math.round(Math.min(iw, ih) / 170));
+  state.S = pixelScale(iw, ih);
   state.W = Math.ceil(iw / state.S);
   state.H = Math.ceil(ih / state.S);
   renderer.resize(iw, ih);
